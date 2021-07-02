@@ -4,12 +4,6 @@ variable "extra_origin_attributes" {
   description = "Additional attributes to put onto the origin label"
 }
 
-variable "extra_logs_attributes" {
-  type        = list(string)
-  default     = ["logs"]
-  description = "Additional attributes to put onto the log bucket label"
-}
-
 variable "acm_certificate_arn" {
   type        = string
   description = "Existing ACM Certificate ARN"
@@ -18,8 +12,13 @@ variable "acm_certificate_arn" {
 
 variable "minimum_protocol_version" {
   type        = string
-  description = "Cloudfront TLS minimum protocol version"
-  default     = "TLSv1"
+  description = <<-EOT
+    Cloudfront TLS minimum protocol version.
+    If `var.acm_certificate_arn` is unset, only "TLSv1" can be specified. See: [AWS Cloudfront create-distribution documentation](https://docs.aws.amazon.com/cli/latest/reference/cloudfront/create-distribution.html)
+    and [Supported protocols and ciphers between viewers and CloudFront](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/secure-connections-supported-viewer-protocols-ciphers.html#secure-connections-supported-ciphers) for more information.
+    Defaults to "TLSv1.2_2019" unless `var.acm_certificate_arn` is unset, in which case it defaults to `TLSv1`
+    EOT
+  default     = ""
 }
 
 variable "aliases" {
@@ -28,16 +27,13 @@ variable "aliases" {
   default     = []
 }
 
-variable "use_regional_s3_endpoint" {
-  type        = bool
-  description = "When set to 'true' the s3 origin_bucket will use the regional endpoint address instead of the global endpoint address"
-  default     = false
-}
-
 variable "additional_bucket_policy" {
   type        = string
   default     = "{}"
-  description = "Additional policies for the bucket. If included in the policies, the variables `$${bucket_name}`, `$${origin_path}` and `$${cloudfront_origin_access_identity_iam_arn}` will be substituted. It is also possible to override the default policy statements by providing statements with `S3GetObjectForCloudFront` and `S3ListBucketForCloudFront` sid."
+  description = <<-EOT
+    Additional policies for the bucket. If included in the policies, the variables `$${bucket_name}`, `$${origin_path}` and `$${cloudfront_origin_access_identity_iam_arn}` will be substituted.
+    It is also possible to override the default policy statements by providing statements with `S3GetObjectForCloudFront` and `S3ListBucketForCloudFront` sid.
+    EOT
 }
 
 variable "override_origin_bucket_policy" {
@@ -48,8 +44,8 @@ variable "override_origin_bucket_policy" {
 
 variable "origin_bucket" {
   type        = string
-  default     = ""
-  description = "Origin S3 bucket name"
+  default     = null
+  description = "Name of an existing S3 bucket to use as the origin. If this is not provided, it will create a new s3 bucket using `var.name` and other context related inputs"
 }
 
 variable "origin_path" {
@@ -63,12 +59,6 @@ variable "origin_force_destroy" {
   type        = bool
   default     = false
   description = "Delete all objects from the bucket so that the bucket can be destroyed without error (e.g. `true` or `false`)"
-}
-
-variable "bucket_domain_format" {
-  type        = string
-  default     = "%s.s3.amazonaws.com"
-  description = "Format of bucket domain name"
 }
 
 variable "compress" {
@@ -89,46 +79,52 @@ variable "comment" {
   description = "Comment for the origin access identity"
 }
 
-variable "logging_enabled" {
-  type        = bool
-  default     = true
-  description = "When true, access logs will be sent to a newly created s3 bucket"
-}
-
-variable "log_include_cookies" {
-  type        = bool
-  default     = false
-  description = "Include cookies in access logs"
-}
-
-variable "log_prefix" {
-  type        = string
-  default     = ""
-  description = "Path of logs in S3 bucket"
-}
-
 variable "log_standard_transition_days" {
   type        = number
-  description = "Number of days to persist in the standard storage tier before moving to the glacier tier"
   default     = 30
+  description = <<-EOT
+    Number of days after object creation to move Cloudfront Access Log objects to the infrequent access tier.
+    Only effective if `cloudfront_access_log_create_bucket` is `true`.
+    EOT
 }
 
 variable "log_glacier_transition_days" {
   type        = number
-  description = "Number of days after which to move the data to the glacier storage tier"
   default     = 60
+  description = <<-EOT
+    Number of days after object creation to move Cloudfront Access Log objects to the glacier tier.
+    Only effective if `cloudfront_access_log_create_bucket` is `true`.
+    EOT
 }
 
 variable "log_expiration_days" {
   type        = number
-  description = "Number of days after which to expunge the objects"
   default     = 90
+  description = <<-EOT
+    Number of days after object creation to expire Cloudfront Access Log objects.
+    Only effective if `cloudfront_access_log_create_bucket` is `true`.
+    EOT
+}
+
+variable "log_versioning_enabled" {
+  type        = bool
+  default     = false
+  description = <<-EOT
+    Set `true` to enable object versioning in the created Cloudfront Access Log S3 Bucket.
+    Only effective if `cloudfront_access_log_create_bucket` is `true`.
+    EOT
 }
 
 variable "forward_query_string" {
   type        = bool
   default     = false
-  description = "Forward query strings to the origin that is associated with this cache behavior"
+  description = "Forward query strings to the origin that is associated with this cache behavior (incompatible with `cache_policy_id`)"
+}
+
+variable "query_string_cache_keys" {
+  type        = list(string)
+  description = "When `forward_query_string` is enabled, only the query string keys listed in this argument are cached (incompatible with `cache_policy_id`)"
+  default     = []
 }
 
 variable "cors_allowed_headers" {
@@ -169,7 +165,7 @@ variable "forward_cookies" {
 
 variable "forward_header_values" {
   type        = list(string)
-  description = "A list of whitelisted header values to forward to the origin"
+  description = "A list of whitelisted header values to forward to the origin (incompatible with `cache_policy_id`)"
   default     = ["Access-Control-Request-Headers", "Access-Control-Request-Method", "Origin"]
 }
 
@@ -181,7 +177,7 @@ variable "price_class" {
 
 variable "viewer_protocol_policy" {
   type        = string
-  description = "allow-all, redirect-to-https"
+  description = "Limit the protocol users can use to access content. One of `allow-all`, `https-only`, or `redirect-to-https`"
   default     = "redirect-to-https"
 }
 
@@ -195,6 +191,15 @@ variable "cached_methods" {
   type        = list(string)
   default     = ["GET", "HEAD"]
   description = "List of cached methods (e.g. GET, PUT, POST, DELETE, HEAD)"
+}
+
+variable "cache_policy_id" {
+  type        = string
+  default     = null
+  description = <<-EOT
+    The unique identifier of the existing cache policy to attach to the default cache behavior.
+    If not provided, this module will add a default cache policy using other provided inputs.
+    EOT
 }
 
 variable "default_ttl" {
@@ -221,6 +226,12 @@ variable "trusted_signers" {
   description = "The AWS accounts, if any, that you want to allow to create signed URLs for private content. 'self' is acceptable."
 }
 
+variable "trusted_key_groups" {
+  type        = list(string)
+  default     = []
+  description = "A list of key group IDs that CloudFront can use to validate signed URLs or signed cookies."
+}
+
 variable "geo_restriction_type" {
   type = string
 
@@ -240,34 +251,19 @@ variable "geo_restriction_locations" {
 variable "parent_zone_id" {
   type        = string
   default     = ""
-  description = "ID of the hosted zone to contain this record  (or specify `parent_zone_name`)"
+  description = "ID of the hosted zone to contain this record (or specify `parent_zone_name`). Requires `dns_alias_enabled` set to true"
 }
 
 variable "parent_zone_name" {
   type        = string
   default     = ""
-  description = "Name of the hosted zone to contain this record (or specify `parent_zone_id`)"
+  description = "Name of the hosted zone to contain this record (or specify `parent_zone_id`). Requires `dns_alias_enabled` set to true"
 }
 
 variable "dns_alias_enabled" {
   type        = bool
   default     = false
-  description = "Explicitly opt into DNS aliasing the CDN."
-}
-
-variable "static_s3_bucket" {
-  type    = string
-  default = "aws-cli"
-
-  description = <<DOC
-aws-cli is a bucket owned by amazon that will perminantly exist.
-It allows for the data source to be called during the destruction process without failing.
-It doesn't get used for anything else, this is a safe workaround for handling the fact that
-if a data source like the one `aws_s3_bucket.selected` gets an error, you can't continue the terraform process
-which also includes the 'destroy' command, where is doesn't even need this data source!
-Don't change this bucket name, it's a variable so that we can provide this description.
-And this works around a problem that is an edge case.
-DOC
+  description = "Create a DNS alias for the CDN. Requires `parent_zone_id` or `parent_zone_name`"
 }
 
 variable "custom_error_response" {
@@ -291,7 +287,21 @@ variable "lambda_function_association" {
     lambda_arn   = string
   }))
 
-  description = "A config block that triggers a lambda function with specific actions"
+  description = "A config block that triggers a lambda@edge function with specific actions"
+  default     = []
+}
+
+variable "function_association" {
+  type = list(object({
+    event_type   = string
+    function_arn = string
+  }))
+
+  description = <<-EOT
+    A config block that triggers a CloudFront function with specific actions.
+    See the [aws_cloudfront_distribution](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudfront_distribution#function-association)
+    documentation for more information.
+  EOT
   default     = []
 }
 
@@ -309,7 +319,7 @@ variable "wait_for_deployment" {
 
 variable "encryption_enabled" {
   type        = bool
-  default     = false
+  default     = true
   description = "When set to 'true' the resource will have aes256 encryption enabled by default"
 }
 
@@ -352,6 +362,9 @@ variable "ordered_cache" {
     cached_methods  = list(string)
     compress        = bool
 
+    cache_policy_id          = string
+    origin_request_policy_id = string
+
     viewer_protocol_policy = string
     min_ttl                = number
     default_ttl            = number
@@ -366,14 +379,18 @@ variable "ordered_cache" {
       include_body = bool
       lambda_arn   = string
     }))
+
+    function_association = list(object({
+      event_type   = string
+      function_arn = string
+    }))
   }))
   default     = []
-  description = <<DESCRIPTION
-An ordered list of cache behaviors resource for this distribution. List from top to bottom in order of precedence. The topmost cache behavior will have precedence 0.
-The fields can be described by the other variables in this file. For example, the field 'lambda_function_association' in this object has
-a description in var.lambda_function_association variable earlier in this file. The only difference is that fields on this object are in ordered caches, whereas the rest
-of the vars in this file apply only to the default cache. Put value `""` on field `target_origin_id` to specify default s3 bucket origin.
-DESCRIPTION
+  description = <<-EOT
+    An ordered list of [cache behaviors](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudfront_distribution#cache-behavior-arguments) resource for this distribution.
+    List in order of precedence (first match wins). This is in addition to the default cache policy.
+    Set `target_origin_id` to `""` to specify the S3 bucket origin created by this module.
+    EOT
 }
 
 variable "custom_origins" {
@@ -381,6 +398,10 @@ variable "custom_origins" {
     domain_name = string
     origin_id   = string
     origin_path = string
+    custom_headers = list(object({
+      name  = string
+      value = string
+    }))
     custom_origin_config = object({
       http_port                = number
       https_port               = number
@@ -391,19 +412,56 @@ variable "custom_origins" {
     })
   }))
   default     = []
-  description = "One or more custom origins for this distribution (multiples allowed). See documentation for configuration options description https://www.terraform.io/docs/providers/aws/r/cloudfront_distribution.html#origin-arguments"
+  description = <<-EOT
+    A list of additional custom website [origins](https://www.terraform.io/docs/providers/aws/r/cloudfront_distribution.html#origin-arguments) for this distribution.
+    EOT
+}
+
+variable "s3_origins" {
+  type = list(object({
+    domain_name = string
+    origin_id   = string
+    origin_path = string
+    s3_origin_config = object({
+      origin_access_identity = string
+    })
+  }))
+  default     = []
+  description = <<-EOT
+    A list of S3 [origins](https://www.terraform.io/docs/providers/aws/r/cloudfront_distribution.html#origin-arguments) (in addition to the one created by this module) for this distribution.
+    S3 buckets configured as websites are `custom_origins`, not `s3_origins`.
+    Specifying `s3_origin_config.origin_access_identity` as `null` or `""` will have it translated to the `origin_access_identity` used by the origin created by the module.
+    EOT
 }
 
 variable "website_enabled" {
   type        = bool
   default     = false
-  description = "Set to true to use an S3 static website as origin"
+  description = <<-EOT
+    Set to true to enable the created S3 bucket to serve as a website independently of Cloudfront,
+    and to use that website as the origin. See the README for details and caveats. See also `s3_website_password_enabled`.
+    EOT
 }
 
 variable "versioning_enabled" {
   type        = bool
-  default     = false
+  default     = true
   description = "When set to 'true' the s3 origin bucket will have versioning enabled"
+}
+
+variable "deployment_principal_arns" {
+  type        = map(list(string))
+  default     = {}
+  description = <<-EOT
+    (Optional) Map of IAM Principal ARNs to lists of S3 path prefixes to grant `deployment_actions` permissions.
+    Resource list will include the bucket itself along with all the prefixes. Prefixes should not begin with '/'.
+    EOT
+}
+
+variable "deployment_actions" {
+  type        = list(string)
+  default     = ["s3:PutObject", "s3:PutObjectAcl", "s3:GetObject", "s3:DeleteObject", "s3:ListBucket", "s3:ListBucketMultipartUploads", "s3:GetBucketLocation", "s3:AbortMultipartUpload"]
+  description = "List of actions to permit `deployment_principal_arns` to perform on bucket and bucket prefixes (see `deployment_principal_arns`)"
 }
 
 variable "cloudfront_origin_access_identity_iam_arn" {
@@ -434,4 +492,142 @@ variable "block_origin_public_access_enabled" {
   type        = bool
   default     = false
   description = "When set to 'true' the s3 origin bucket will have public access block enabled"
+}
+
+variable "s3_access_logging_enabled" {
+  type        = bool
+  default     = null
+  description = <<-EOF
+    Set `true` to deliver S3 Access Logs to the `s3_access_log_bucket_name` bucket.
+    Defaults to `false` if `s3_access_log_bucket_name` is empty (the default), `true` otherwise.
+    Must be set explicitly if the access log bucket is being created at the same time as this module is being invoked.
+    EOF
+}
+
+variable "s3_access_log_bucket_name" {
+  type        = string # diff hint
+  default     = ""     # diff hint
+  description = "Name of the existing S3 bucket where S3 Access Logs will be delivered. Default is not to enable S3 Access Logging."
+}
+
+variable "s3_access_log_prefix" {
+  type        = string # diff hint
+  default     = ""     # diff hint
+  description = "Prefix to use for S3 Access Log object keys. Defaults to `logs/$${module.this.id}`"
+}
+
+variable "cloudfront_access_logging_enabled" {
+  type        = bool
+  default     = true
+  description = "Set true to enable delivery of Cloudfront Access Logs to an S3 bucket"
+}
+
+variable "cloudfront_access_log_create_bucket" {
+  type        = bool
+  default     = true
+  description = <<-EOT
+    When `true` and `cloudfront_access_logging_enabled` is also true, this module will create a new,
+    separate S3 bucket to receive Cloudfront Access Logs.
+    EOT
+}
+
+variable "extra_logs_attributes" {
+  type        = list(string)
+  default     = ["logs"]
+  description = <<-EOT
+    Additional attributes to add to the end of the generated Cloudfront Access Log S3 Bucket name.
+    Only effective if `cloudfront_access_log_create_bucket` is `true`.
+    EOT
+}
+
+
+variable "cloudfront_access_log_bucket_name" {
+  type        = string # diff hint
+  default     = ""     # diff hint
+  description = <<-EOT
+    When `cloudfront_access_log_create_bucket` is `false`, this is the name of the existing S3 Bucket where
+    Cloudfront Access Logs are to be delivered and is required. IGNORED when `cloudfront_access_log_create_bucket` is `true`.
+    EOT
+}
+
+variable "cloudfront_access_log_include_cookies" {
+  type        = bool
+  default     = false
+  description = "Set true to include cookies in Cloudfront Access Logs"
+}
+
+variable "cloudfront_access_log_prefix" {
+  type        = string # diff hint
+  default     = ""     # diff hint
+  description = "Prefix to use for Cloudfront Access Log object keys. Defaults to no prefix."
+}
+
+variable "distribution_enabled" {
+  type        = bool
+  default     = true
+  description = "Set to `false` to create the distribution but still prevent CloudFront from serving requests."
+}
+
+variable "s3_website_password_enabled" {
+  type        = bool
+  default     = false
+  description = <<-EOT
+    If set to true, and `website_enabled` is also true, a password will be required in the `Referrer` field of the
+    HTTP request in order to access the website, and Cloudfront will be configured to pass this password in its requests.
+    This will make it much harder for people to bypass Cloudfront and access the S3 website directly via its website endpoint.
+    EOT
+}
+
+variable "origin_groups" {
+  type = list(object({
+    primary_origin_id  = string
+    failover_origin_id = string
+    failover_criteria  = list(string)
+  }))
+  default     = []
+  description = <<-EOT
+    List of [Origin Groups](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudfront_distribution#origin-group-arguments) to create in the distribution.
+    The values of `primary_origin_id` and `failover_origin_id` must correspond to origin IDs existing in `var.s3_origins` or `var.custom_origins`.
+
+    If `primary_origin_id` is set to `null` or `""`, then the origin id of the origin created by this module will be used in its place.
+    This is to allow for the use case of making the origin created by this module the primary origin in an origin group.
+  EOT
+}
+
+# Variables below here are DEPRECATED and should not be used anymore
+
+variable "access_log_bucket_name" {
+  type        = string
+  default     = null
+  description = "DEPRECATED. Use `s3_access_log_bucket_name` instead."
+}
+
+variable "logging_enabled" {
+  type        = bool
+  default     = null
+  description = "DEPRECATED. Use `cloudfront_access_logging_enabled` instead."
+}
+
+variable "log_include_cookies" {
+  type        = bool
+  default     = null
+  description = "DEPRECATED. Use `cloudfront_access_log_include_cookies` instead."
+}
+
+variable "log_prefix" {
+  type        = string
+  default     = null
+  description = "DEPRECATED. Use `cloudfront_access_log_prefix` instead."
+}
+
+variable "realtime_log_config_arn" {
+  type        = string
+  default     = null
+  description = "The ARN of the real-time log configuration that is attached to this cache behavior"
+}
+
+variable "allow_ssl_requests_only" {
+  type        = bool
+  default     = true
+  description = "Set to `true` to require requests to use Secure Socket Layer (HTTPS/SSL). This will explicitly deny access to HTTP requests"
 }
